@@ -8,6 +8,7 @@ always playable.
 import json
 import queue
 import random
+import ssl
 import threading
 import urllib.error
 import urllib.request
@@ -43,6 +44,19 @@ Rules:
 {ACTION_SPEC}
 
 Respond ONLY with JSON: {{"reply": "<what you say>", "action": <action object or null>}}"""
+
+
+def _ssl_context():
+    """python.org's macOS Python (and PyInstaller apps) often lack root certificates;
+    certifi's bundle makes HTTPS work out of the box."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+SSL_CONTEXT = _ssl_context()
 
 
 class DeepSeekClient:
@@ -88,7 +102,7 @@ class DeepSeekClient:
                 "Authorization": f"Bearer {self.api_key}",
             },
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
             data = json.loads(resp.read().decode())
         content = data["choices"][0]["message"]["content"]
         return parse_reply(content)
@@ -110,7 +124,12 @@ def _describe_error(exc) -> str:
             return "DeepSeek account has insufficient balance (402)."
         return f"DeepSeek HTTP error {exc.code}."
     if isinstance(exc, urllib.error.URLError):
-        return "Could not reach DeepSeek (offline?)."
+        reason = exc.reason
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            return "Secure connection failed (missing certificates). Run: pip install certifi"
+        return f"Could not reach DeepSeek: {reason}"
+    if isinstance(exc, TimeoutError):
+        return "DeepSeek took too long to answer. Try again."
     return f"AI error: {exc.__class__.__name__}"
 
 
