@@ -4,6 +4,8 @@ import random
 import pygame
 
 from . import ai, settings as cfg
+from .updater import UpdateChecker
+from .version import VERSION
 from .entities import CROPS, Car, Farm, NPC, Player
 from .world import TILE, World
 
@@ -93,6 +95,9 @@ class Game:
         self.key_status = ""
         self.menu_idx = 0
         self.save_timer = 60.0
+        self.updates = UpdateChecker()
+        self.updates.check()  # quiet check at startup; a toast appears if there's news
+        self.update_toasted = False
         self.running = True
         self.real_time = 0.0
         self._load()
@@ -417,7 +422,8 @@ class Game:
             self.coins += total
             self.toast(f"Sold everything for {total} coins." if total else "Nothing to sell yet.")
 
-    MENU = ["Resume", "DeepSeek API key", "AI greetings when passing by", "Toggle fullscreen", "Save & Quit"]
+    MENU = ["Resume", "DeepSeek API key", "AI greetings when passing by", "Check for updates",
+            "Toggle fullscreen", "Save & Quit"]
 
     def key_menu(self, ev):
         k = ev.key
@@ -437,6 +443,11 @@ class Game:
             elif choice.startswith("AI greetings"):
                 self.settings["ambient_ai_greetings"] = not self.settings.get("ambient_ai_greetings", True)
                 cfg.save_settings(self.settings)
+            elif choice == "Check for updates":
+                if self.updates.state == "available":
+                    self.updates.open_download()
+                else:
+                    self.updates.check()
             elif choice == "Toggle fullscreen":
                 pygame.display.toggle_fullscreen()
             elif choice == "Save & Quit":
@@ -467,6 +478,9 @@ class Game:
     # -- update ------------------------------------------------------------------------
     def update(self, dt):
         self.real_time += dt
+        if self.updates.state == "available" and not self.update_toasted:
+            self.update_toasted = True
+            self.toast(f"New version {self.updates.remote_version} available! Esc -> Check for updates.", 8)
         self.handle_ai_results()
         self.toasts = [[t, s - dt] for t, s in self.toasts if s - dt > 0]
         if self.mode in ("menu", "key", "help"):
@@ -811,10 +825,12 @@ class Game:
         shade = pygame.Surface((w, h), pygame.SRCALPHA)
         shade.fill((10, 12, 20, 140))
         scr.blit(shade, (0, 0))
-        rect = pygame.Rect(0, 0, 560, 360)
+        rect = pygame.Rect(0, 0, 560, 420)
         rect.center = (w / 2, h / 2)
         panel(scr, rect)
         if self.mode == "menu":
+            ver = self.small.render(f"version {VERSION}", True, UI_DIM)
+            scr.blit(ver, ver.get_rect(topright=(rect.right - 24, rect.y + 30)))
             scr.blit(self.big.render("Paused", True, UI_ACCENT), (rect.x + 24, rect.y + 18))
             for i, item in enumerate(self.MENU):
                 label = item
@@ -822,9 +838,15 @@ class Game:
                     label += ": " + ("on" if self.settings.get("ambient_ai_greetings", True) else "off")
                 if item == "DeepSeek API key":
                     label += ": " + ("set" if self.ai.online else "not set")
+                if item == "Check for updates" and self.updates.state == "available":
+                    label = f"Download version {self.updates.remote_version}"
                 colour = UI_ACCENT if i == self.menu_idx else UI_FG
                 scr.blit(self.font.render(("> " if i == self.menu_idx else "  ") + label, True, colour),
                          (rect.x + 30, rect.y + 80 + i * 36))
+            colour = {"available": UI_ACCENT, "current": (140, 230, 150), "error": (255, 140, 120)}.get(
+                self.updates.state, UI_DIM)
+            for i, line in enumerate(wrap(self.small, self.updates.message, rect.w - 60)[:2]):
+                scr.blit(self.small.render(line, True, colour), (rect.x + 30, rect.bottom - 76 + i * 18))
             scr.blit(self.small.render("Up/Down + Enter.  Esc: resume.", True, UI_DIM),
                      (rect.x + 30, rect.bottom - 34))
         else:
