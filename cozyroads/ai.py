@@ -84,6 +84,7 @@ class DeepSeekClient:
             result = self._call(messages, max_tokens)
         except Exception as exc:  # network, HTTP, JSON - fall back gracefully
             result = {"reply": None, "action": None, "error": _describe_error(exc)}
+            _log_error(exc)
         self.results.put((tag, result))
 
     def _call(self, messages, max_tokens):
@@ -114,6 +115,21 @@ class DeepSeekClient:
                 out.append(self.results.get_nowait())
             except queue.Empty:
                 return out
+
+
+def _log_error(exc):
+    """Keep the full error in ai_errors.log next to the save file, for troubleshooting."""
+    try:
+        import time
+        import traceback
+        from .settings import data_dir
+        with open(data_dir() / "ai_errors.log", "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + "".join(
+                traceback.format_exception_only(type(exc), exc)))
+            if isinstance(exc, urllib.error.HTTPError):
+                f.write("  body: " + exc.read(500).decode(errors="replace") + "\n")
+    except Exception:
+        pass
 
 
 def _describe_error(exc) -> str:
@@ -154,7 +170,7 @@ OFFLINE_GREETINGS = {
 }
 
 
-def offline_reply(npc, user_text: str, places: list) -> dict:
+def offline_reply(npc, user_text: str, places: list, key_hint: bool = True) -> dict:
     text = user_text.lower()
     if npc.name == "Juno" and random.random() < 0.5:
         place = random.choice(places)
@@ -173,6 +189,6 @@ def offline_reply(npc, user_text: str, places: list) -> dict:
         return {"reply": "Sure, lead the way!", "action": {"type": "follow_player"}}
     lines = OFFLINE_GREETINGS.get(npc.name, ["Lovely day, isn't it?"])
     return {
-        "reply": random.choice(lines) + " (Add a DeepSeek key in Settings for real conversations.)",
+        "reply": random.choice(lines) + (" (Add a DeepSeek key in Settings for real conversations.)" if key_hint else ""),
         "action": None,
     }

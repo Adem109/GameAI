@@ -88,6 +88,7 @@ class Game:
         self.chat_npc = None
         self.chat_input = ""
         self.chat_status = ""
+        self.ai_error = ""  # last DeepSeek failure, shown in chat and HUD
         self.key_input = ""
         self.key_status = ""
         self.menu_idx = 0
@@ -230,12 +231,15 @@ class Game:
                 continue
             npc.busy = False
             if result.get("error"):
+                self.ai_error = result["error"]
                 self.toast(result["error"], 5)
                 if kind == "chat":
                     result = ai.offline_reply(npc, npc.history[-1]["content"] if npc.history else "",
-                                              list(self.world.places))
+                                              list(self.world.places), key_hint=False)
                 else:
                     continue
+            else:
+                self.ai_error = ""
             reply = result["reply"]
             if kind == "greet":
                 npc.say(reply, 5)
@@ -696,8 +700,11 @@ class Game:
                 scr.blit(self.small.render(row, True, UI_FG), (mr.x + 6, y + 26 + i * 20))
 
         # AI status
-        status = "AI: DeepSeek" if self.ai.online else "AI: offline (Esc to add key)"
-        colour = (140, 230, 150) if self.ai.online else UI_DIM
+        if self.ai.online and self.ai_error:
+            status = f"AI: DeepSeek problem - {self.ai_error}"
+        else:
+            status = "AI: DeepSeek" if self.ai.online else "AI: offline (Esc to add key)"
+        colour = (255, 140, 120) if self.ai_error else (140, 230, 150) if self.ai.online else UI_DIM
         scr.blit(self.small.render(status, True, colour), (24, 132))
 
         # context hint
@@ -766,6 +773,10 @@ class Game:
         if self.chat_status and npc.busy:
             dots = "." * (int(self.real_time * 3) % 4)
             scr.blit(self.font.render(f"{npc.name} is thinking{dots}", True, UI_DIM), (rect.x + 18, y))
+        elif self.ai.online and self.ai_error:
+            msg = f"DeepSeek failed, using an offline reply: {self.ai_error}"
+            for i, line in enumerate(wrap(self.small, msg, rect.w - 36)[:2]):
+                scr.blit(self.small.render(line, True, (255, 140, 120)), (rect.x + 18, y + 4 + i * 18))
         box = pygame.Rect(rect.x + 14, rect.bottom - 48, rect.w - 28, 36)
         pygame.draw.rect(scr, (250, 250, 245), box, border_radius=8)
         text = self.chat_input + ("|" if int(self.real_time * 2) % 2 == 0 else "")
